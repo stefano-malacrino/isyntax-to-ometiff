@@ -4,7 +4,9 @@ Python script to convert Philips iSyntax files to [OME-TIFF](https://docs.openmi
 ## Requirements
 * Python 3.6+
 * numpy
+* glymur
 * libtiff 4.0.10+
+* OpenJPEG 2.3.1+
 * [Philips iSyntax SDK 2.0](https://www.openpathology.philips.com)
 
 ## Usage
