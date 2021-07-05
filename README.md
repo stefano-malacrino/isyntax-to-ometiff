@@ -12,6 +12,6 @@ Python script to convert Philips iSyntax files to [OME-TIFF](https://docs.openmi
 ## Usage
 Basic usage is
 ```
-python isyntax_to_tiff.py /path/to/input/file.isyntax /path/to/output/dir
+python isyntax_to_ometiff.py /path/to/input/file.isyntax /path/to/output/dir
 ```
-See `python isyntax_to_tiff.py --help` for the list of optional parameters and their default values.
+See `python isyntax_to_ometiff.py --help` for the list of optional parameters and their default values.
