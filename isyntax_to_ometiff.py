@@ -117,10 +117,10 @@ class TiffWriter:
         return mul * round(x / mul)
         
     def get_tiff_dimensions(self, view, level):
-        x_start, x_step, x_end = view.dimension_ranges(level)[0]
-        y_start, y_step, y_end = view.dimension_ranges(level)[1]
-        tiff_width = (self.round_to_mul(x_end, x_step) - self.round_to_mul(x_start, x_step)) // x_step + x_step
-        tiff_height = (self.round_to_mul(y_end, y_step) - self.round_to_mul(y_start, y_step)) // y_step + y_step
+        x_step, x_end = view.dimension_ranges(level)[0][1:]
+        y_step, y_end = view.dimension_ranges(level)[1][1:]
+        tiff_width = self.round_to_mul(x_end + 1, x_step) // x_step
+        tiff_height = self.round_to_mul(y_end + 1, y_step) // y_step
         return tiff_width, tiff_height
      
     def patch_within_data_envelopes(self, patch, data_envelopes):
@@ -150,10 +150,8 @@ class TiffWriter:
         trunc_level = {0: [0, 0, 0]}
         view.truncation(False, False, trunc_level)
         
-        x_start, x_step = view.dimension_ranges(level)[0][:2]
-        y_start, y_step = view.dimension_ranges(level)[1][:2]
-        x_start = self.round_to_mul(x_start, x_step) 
-        y_start = self.round_to_mul(y_start, y_step)
+        x_step = view.dimension_ranges(level)[0][1]
+        y_step = view.dimension_ranges(level)[1][1]
         
         data_envelopes = view.data_envelopes(level)
         regions = view.request_regions(patches, data_envelopes, True, [255,255,255],
@@ -164,8 +162,8 @@ class TiffWriter:
                 regions.remove(region)
                 patch = np.empty(buff_size, dtype=np.uint8)
                 region.get(patch)
-                x, y = (self.round_to_mul(region.range[0], x_step) - x_start) // x_step, \
-                       (self.round_to_mul(region.range[2], y_step) - y_start) // y_step
+                x, y = self.round_to_mul(region.range[0], x_step) // x_step, \
+                       self.round_to_mul(region.range[2], y_step) // y_step
                 queue_in.put((x, y, patch))
             
         for _ in range(n_workers):
@@ -177,10 +175,10 @@ class TiffWriter:
     def get_additional_image_metadata(self, image_type, root, ifd):
         image_name = {'MACROIMAGE': 'MACRO', 'LABELIMAGE': 'LABEL'}[image_type]
         view = self.pixel_engine['in'][image_type].source_view
-        x_start, x_step, x_end = view.dimension_ranges(0)[0]
-        y_start, y_step, y_end = view.dimension_ranges(0)[1]
-        width = int(x_end - x_start + x_step)
-        height = int(y_end - y_start + y_step)
+        x_end = view.dimension_ranges(0)[0][2]
+        y_end = view.dimension_ranges(0)[1][2]
+        width = int(x_end + 1)
+        height = int(y_end + 1)
 
         image = SubElement(root, 'Image', {'ID':f'Image:{ifd}', 'Name':image_name})
         pixels = SubElement(image, 'Pixels', {
@@ -284,8 +282,8 @@ class TiffWriter:
                 self.tiff_handle.set_field(TIFFTAG_PSEUDO.JPEGCOLORMODE, JPEGCOLORMODE.RGB)
 
     def get_patches(self, view, level, tiff_dims):
-        x_start, x_step, x_end = view.dimension_ranges(level)[0]
-        y_start, y_step, y_end = view.dimension_ranges(level)[1]
+        x_step, x_end = view.dimension_ranges(level)[0][1:]
+        y_step, y_end = view.dimension_ranges(level)[1][1:]
         
         patch_width = self.conf.tiff_tile_width * x_step
         patch_height = self.conf.tiff_tile_height * y_step
@@ -295,9 +293,9 @@ class TiffWriter:
             
         patches = []
 
-        for y_patch_start in range(y_start, y_end, patch_height):
+        for y_patch_start in range(0, y_end, patch_height):
             y_patch_end = y_patch_start + patch_height
-            for x_patch_start in range(x_start, x_end, patch_width):
+            for x_patch_start in range(0, x_end, patch_width):
                 x_patch_end = x_patch_start + patch_width
                 patch = [x_patch_start, x_patch_end - x_step,
                          y_patch_start, y_patch_end - y_step, level]
