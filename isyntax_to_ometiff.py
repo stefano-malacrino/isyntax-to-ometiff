@@ -103,11 +103,13 @@ class TiffWriter:
             patches = self.get_patches(view, level, tiff_dims)
             self.write_tiles(level, patches)
             self.tiff_handle.write_directory()
+
+        images = [self.pixel_engine['in'][i].image_type for i in range(self.pixel_engine['in'].num_images)]
         
-        if self.conf.macro:
+        if self.conf.macro and 'MACROIMAGE' in images:
             self.write_additional_image('MACROIMAGE')
         
-        if self.conf.label:
+        if self.conf.label and 'LABELIMAGE' in images:
             self.write_additional_image('LABELIMAGE')
         
         self.tiff_handle.close()
