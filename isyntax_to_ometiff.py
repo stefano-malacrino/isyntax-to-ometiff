@@ -260,14 +260,16 @@ class TiffWriter:
         if level > self.conf.start_level:
             self.tiff_handle.set_field(TIFFTAG.SUBFILETYPE, FILETYPE.REDUCEDIMAGE)
         else:
-            metadata = self.get_ome_metadata(tiff_dims, pixel_res)
             self.tiff_handle.set_field(TIFFTAG.SOFTWARE, b'isyntax2tiff')
-            self.tiff_handle.set_field(TIFFTAG.IMAGEDESCRIPTION, metadata)
             self.tiff_handle.set_field(TIFFTAG.XRESOLUTION, 1e4 / pixel_res[0])
             self.tiff_handle.set_field(TIFFTAG.YRESOLUTION, 1e4 / pixel_res[1])
-            # Use subIFDs to store sub-resolutions following OME-TIFF specification
-            offsets = [0 for _ in range(level+1, n_levels)]
-            self.tiff_handle.set_field(TIFFTAG.SUBIFD, offsets)
+            if not self.conf.no_ome:
+                # Use subIFDs to store sub-resolutions following OME-TIFF specification
+                offsets = [0 for _ in range(level+1, n_levels)]
+                self.tiff_handle.set_field(TIFFTAG.SUBIFD, offsets)
+                metadata = self.get_ome_metadata(tiff_dims, pixel_res)
+                self.tiff_handle.set_field(TIFFTAG.IMAGEDESCRIPTION, metadata)
+            
 
         self.tiff_handle.set_field(TIFFTAG.IMAGEWIDTH, tiff_dims[0])
         self.tiff_handle.set_field(TIFFTAG.IMAGELENGTH, tiff_dims[1])
@@ -385,5 +387,6 @@ if __name__ == '__main__':
     parser.add_argument('--label', action='store_true', help='Include label image')
     parser.add_argument('--n-workers', dest='n_workers', type=non_neg_int, default=8, help='Number of workers')
     parser.add_argument('--queue-size', dest='queue_size', type=non_neg_int, default=512, help='Workers queue size')
+    parser.add_argument('--no-ome', dest='no_ome', action='store_true', help='Convert as regular tiff')
     args = parser.parse_args()
     main(args)
