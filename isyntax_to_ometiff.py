@@ -4,8 +4,10 @@ import math
 import numpy as np
 import sys
 import tempfile
+import traceback
 import uuid
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from queue import Queue
 from threading import Thread, Lock
@@ -50,27 +52,28 @@ class JpegTileWriter:
             res = self.tiff_handle.write_encoded_tile(tile_index, data.ctypes.data, data_size)
         return res
         
-class TilesWriter(Thread):
+def worker_write_tiles(queue_in, lock, tiff_handle, tile_dims, compression, psnr):
+    if compression == 'jpeg2000':
+        tile_writer = Jpeg2000TileWriter(lock, tiff_handle, tile_dims, psnr)
+    else:
+        tile_writer = JpegTileWriter(lock, tiff_handle)
+            
+    exc_list = []
 
-    def __init__(self, queue_in, lock, tiff_handle, tile_dims, compression, psnr):
-        Thread.__init__(self, name='TilesWriter')
-        self.queue_in = queue_in
-        self.tiff_handle = tiff_handle
-        
-        if compression == 'jpeg2000':
-            self.tile_writer = Jpeg2000TileWriter(lock, tiff_handle, tile_dims, psnr)
-        else:
-            self.tile_writer = JpegTileWriter(lock, tiff_handle)
-            
-    def run(self):
-            
-        while True:
-            data_in = self.queue_in.get()
-            if data_in is None:
-                break
+    while True:
+        data_in = queue_in.get()
+        if data_in is None:
+            break
+        try:
             x, y, tile = data_in
-            tile_index = self.tiff_handle.compute_tile(x, y, 0, 0)
-            self.tile_writer(tile_index, tile)
+            tile_index = tiff_handle.compute_tile(x, y, 0, 0)
+            tile_writer(tile_index, tile)
+        except Exception as exc:
+            traceback.print_exc()
+            exc_list.append(exc)
+
+    if len(exc_list) > 0:
+        raise Exception(exc_list)
         
 class TiffWriter:
     
@@ -142,37 +145,42 @@ class TiffWriter:
         n_workers = min(self.conf.n_workers, len(patches))
         queue_in = Queue(self.conf.queue_size)
         lock = Lock()
+
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = [
+                executor.submit(
+                    worker_write_tiles,
+                    queue_in, lock,
+                    self.tiff_handle,
+                    (self.conf.tiff_tile_width, self.conf.tiff_tile_height),
+                    self.conf.compression, self.conf.psnr) for _ in range(n_workers)]
         
-        workers = [TilesWriter(queue_in, lock, self.tiff_handle, (self.conf.tiff_tile_width, self.conf.tiff_tile_height), self.conf.compression, self.conf.psnr) for _ in range(n_workers)]
-        
-        for worker in workers:
-            worker.start()
+            view = self.pixel_engine['in']['WSI'].source_view
+            trunc_level = {0: [0, 0, 0]}
+            view.truncation(False, False, trunc_level)
             
-        view = self.pixel_engine['in']['WSI'].source_view
-        trunc_level = {0: [0, 0, 0]}
-        view.truncation(False, False, trunc_level)
-        
-        x_step = view.dimension_ranges(level)[0][1]
-        y_step = view.dimension_ranges(level)[1][1]
-        
-        data_envelopes = view.data_envelopes(level)
-        regions = view.request_regions(patches, data_envelopes, True, [255,255,255],
-                      self.pixel_engine.BufferType(0))
-        buff_size = self.conf.tiff_tile_width * self.conf.tiff_tile_height * 3
-        while regions:
-            for region in self.pixel_engine.wait_any():
-                regions.remove(region)
-                patch = np.empty(buff_size, dtype=np.uint8)
-                region.get(patch)
-                x, y = self.round_to_mul(region.range[0], x_step) // x_step, \
-                       self.round_to_mul(region.range[2], y_step) // y_step
-                queue_in.put((x, y, patch))
+            x_step = view.dimension_ranges(level)[0][1]
+            y_step = view.dimension_ranges(level)[1][1]
             
-        for _ in range(n_workers):
-            queue_in.put(None)
-        
-        for worker in workers:
-            worker.join()
+            data_envelopes = view.data_envelopes(level)
+            regions = view.request_regions(patches, data_envelopes, True, [255,255,255],
+                        self.pixel_engine.BufferType(0))
+            buff_size = self.conf.tiff_tile_width * self.conf.tiff_tile_height * 3
+            try:
+                while regions:
+                    for region in self.pixel_engine.wait_any():
+                        regions.remove(region)
+                        patch = np.empty(buff_size, dtype=np.uint8)
+                        region.get(patch)
+                        x, y = self.round_to_mul(region.range[0], x_step) // x_step, \
+                            self.round_to_mul(region.range[2], y_step) // y_step
+                        queue_in.put((x, y, patch))
+            except:
+                raise
+            finally:
+                for _ in range(n_workers):
+                    queue_in.put(None)
+                [future.result() for future in futures]
 
     def get_additional_image_metadata(self, image_type, root, ifd):
         image_name = {'MACROIMAGE': 'MACRO', 'LABELIMAGE': 'LABEL'}[image_type]
