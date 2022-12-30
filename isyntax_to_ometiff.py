@@ -242,12 +242,14 @@ class TiffWriter:
             })
         tiff_data = SubElement(pixels, 'TiffData', {'IFD':'0', 'PlaneCount':'1'})
         ifd = 1
+
+        images = [self.pixel_engine['in'][i].image_type for i in range(self.pixel_engine['in'].num_images)]
         
-        if self.conf.macro:
+        if self.conf.macro and 'MACROIMAGE' in images:
             self.get_additional_image_metadata('MACROIMAGE', root, ifd)
             ifd += 1
             
-        if self.conf.label:
+        if self.conf.label and 'LABELIMAGE' in images:
             self.get_additional_image_metadata('LABELIMAGE', root, ifd)
     
         xml_declaration = b'<?xml version="1.0" encoding="UTF-8"?>\n'
